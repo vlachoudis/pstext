@@ -113,7 +113,8 @@ class Postscript:
 
 	# Map of fonts to default ones
 	FONT_TABLE = {
-		"DejaVu-Sans"      : "Palatino",
+		"DejaVu-Sans"      : "Sans",
+		"DejaVu-Sans-bold" : "Sans-Bold",
 		"DejaVu-Sans-Mono" : "Arial-Monospace",
 		"Liberation-Sans"  : "Helvetica-Monospace",
 		}
@@ -121,57 +122,68 @@ class Postscript:
 	PROLOG = """
 %--------- Procedures ----------------
 % Optimize without dict variables later, if at all
-/rectpath               % stk: width height left top => --
-{ /h exch def
-  /w exch def
-  /t exch def
-  /l exch def
-
-  newpath
-  l t moveto
-  w 0 rlineto
-  0 h neg rlineto
-  w neg 0 rlineto
-  0 h rlineto
+/centershow {
+   /s exch def
+   /y exch def
+   /rm exch def
+   /lm exch def
+   rm lm sub
+   s stringwidth pop sub
+   2 div
+   lm add y moveto
+    s show
 } def
 
-/centershow               % stk: y leftmargin rightmargin string => --
-{ /s exch def
-  /y exch def
-  /rm exch def
-  /lm exch def
-  rm lm sub
-  s stringwidth pop sub
-  2 div
-  lm add y moveto
-  s show
+/xmoveto {
+   currentpoint
+   exch
+   pop
+   moveto
 } def
 
-/rightshow               % stk: y rightmargin string => --
-{ /s exch def
-  /y exch def
-  /rm exch def
-  s stringwidth pop
-  rm exch sub
-  y moveto
-  s show
+/ymoveto {
+   currentpoint
+   pop
+   exch
+   moveto
 } def
 
-/bgrect
-{ /s exch def
-  currentpoint
-  s false charpath pathbbox
-  /ury exch def
-  /urx exch def
-  /lly exch def
-  /llx exch def
-  newpath
-  llx lly moveto
-  urx lly lineto
-  urx ury lineto
-  llx ury lineto
-  llx lly moveto
-  fill
+/rightshow {
+   /s exch def
+   s stringwidth
+   neg exch neg exch
+   rmoveto
+   s show
+} def
+
+/rectpath {
+    /h exch def
+    /w exch def
+    /t exch def
+    /l exch def
+    newpath
+    l t moveto
+    w 0 rlineto
+    0 h neg rlineto
+    w neg 0 rlineto
+    0 h rlineto
+} def
+
+/bgrect {
+   /s exch def
+   currentpoint
+   s false charpath pathbbox
+   /ury exch def
+   /urx exch def
+   /lly exch def
+   /llx exch def
+   newpath
+   llx lly moveto
+   urx lly lineto
+   urx ury lineto
+   llx ury lineto
+   llx lly moveto
+   fill
 } def
 %---------- PS Card --------------------
 """
@@ -202,6 +214,7 @@ class Postscript:
 	def __init__(self, filename=None, paper=DEFAULT_PAGE, landscape=False):
 		"""Open a postscript file for writing"""
 		self.f = None
+		self._f_opened = False
 
 		# initialize variables
 		self.cursor_x           =  0
@@ -213,11 +226,13 @@ class Postscript:
 		self.margin_left        =  0
 		self.margin_right       =  0
 		self.header             = "Postscript Header"
-		self.footerfont         = "Times-Bold"
-		self.footersize         = 12
+		self.headerfont         = "Times-Bold"
+		self.headersize         = 12
+		self.headergray         = 0.8
 		self.footer             = "- %d -"
 		self.footerfont         = "Times-Roman"
 		self.footersize         = 12
+		self.footergray         = 0.8
 
 		self._tobuffer = False
 		self._buffer   = []	# buffer commands to find line height before drawing
@@ -251,7 +266,11 @@ class Postscript:
 	#-----------------------------------------------------------------------
 	def open(self, filename):
 		"""Open a postscript file for writing"""
-		self.f = open(filename,"w")
+		if isinstance(filename,str):
+			self.f = open(filename,"w")
+			self._f_opened = True
+		else:
+			self.f = filename
 		self(Postscript.HEADER)
 		self.resetCursor()
 
@@ -263,7 +282,8 @@ class Postscript:
 			# correct pages
 			self.f.seek(self._page_marker)
 			self.write("%d"%(self._page_count))
-		self.f.close()
+		if self._f_opened:
+			self.f.close()
 
 	#-----------------------------------------------------------------------
 	# Write directly to file
@@ -307,7 +327,10 @@ class Postscript:
 		self("%%DocumentPaperSizes:",self.paper)
 		self("%%Orientation:", "Landscape" if self.landscape else "Portrait")
 		self("%%Pages:       ")
-		self._page_marker = self.f.tell()-7
+		try:
+			self._page_marker = self.f.tell()-7
+		except AttributeError:
+			pass
 		self("%%EndComments")
 #		PrologTarget = "%%BeginProlog\n"
 
@@ -357,21 +380,21 @@ class Postscript:
 	def newpageSetup(self):
 #		self("BeginInclude")
 		self("%%%%Page: %d %d"%(self._page_count, self._page_count))
-
 		if self.landscape:
 			self.translate(self.page_height, 0)
 			self.rotate(90)
-
 		self.gsave()
-
 		# Draw page header & footer
-		self.setFont(self.footerfont, self.footersize)
 		if self.header:
 			# Header
+			self.setFont(self.headerfont, self.headersize)
+			self.setGray(self.headergray)
 			if self._page_count % 2:
-				self.showRight(self.margin_right, self.margin_top, self.header)
+				self.moveto(self.margin_right, self.margin_top)
+				self.showRight(self.header)
 			else:
-				self.showLeft(self.margin_left, self.margin_top, self.header)
+				self.moveto(self.margin_left, self.margin_top)
+				self.show(self.header)
 			self.newpath()
 			self.lineWidth(0.1)
 			self.moveto(self.margin_left,  self.margin_top-1*mm)
@@ -379,6 +402,9 @@ class Postscript:
 			self.stroke()
 
 		if self.footer:
+			self.setFont(self.footerfont, self.footersize)
+			self.setGray(self.footergray)
+
 			# Page number
 			self.showCenter(self.margin_left, self.margin_right, self.margin_bottom-2*mm,
 					self.footer%(self._page_count))
@@ -387,7 +413,6 @@ class Postscript:
 			self.moveto(self.margin_left,  self.margin_bottom+2*mm)
 			self.lineto(self.margin_right, self.margin_bottom+2*mm)
 			self.stroke()
-
 		self.grestore()
 #		self("EndInclude")
 
@@ -431,6 +456,20 @@ class Postscript:
 			self("%.3f %.3f moveto" % (x, y))
 
 	#-----------------------------------------------------------------------
+	# Move only x/y at absolute position
+	#-----------------------------------------------------------------------
+	def xmoveto(self, x):
+		self("%.3f xmoveto"%(x))
+
+	#-----------------------------------------------------------------------
+	def ymoveto(self, y):
+		self("%.3f xmoveto"%(y))
+
+	#-----------------------------------------------------------------------
+	def rmoveto(self, x, y):
+		self("%.3f %.3f rmoveto" % (x, y))
+
+	#-----------------------------------------------------------------------
 	def translate(self, x, y):
 		self("%.3f %.3f translate" % (x, y))
 
@@ -449,7 +488,7 @@ class Postscript:
 	#-----------------------------------------------------------------------
 	# Color commands
 	#-----------------------------------------------------------------------
-	def setGray(percent):
+	def setGray(self, percent):
 		self(" %.3f setgray" % percent)
 
 	#-----------------------------------------------------------------------
@@ -474,9 +513,10 @@ class Postscript:
 		return name
 
 	#-----------------------------------------------------------------------
-	def setFont(self, name, fontsize):
+	def setFont(self, fontname, fontsize):
 		"""Select current font and font size"""
-		name = Postscript.findFont(name)
+		name = Postscript.findFont(fontname)
+#		print("FONT:", fontname, "->", name)
 		self("/%s findfont %.3f scalefont setfont" % (name, fontsize))
 		self.current_font_size = fontsize
 		self.current_line_size = max(self.current_line_size, fontsize)
@@ -486,7 +526,7 @@ class Postscript:
 	def escape(s):
 		sout = ""
 		for ch in s:
-			if ch.isalnum():
+			if ch in " ." or ch.isalnum():
 				sout += ch
 			else:
 				sout += "\\%o"%(ord(ch))
@@ -508,12 +548,8 @@ class Postscript:
 		self("(%s) show"%(s))
 
 	#-----------------------------------------------------------------------
-	def showLeft(self, x, y, s):
-		self("%.3f %.3f moveto (%s) show" % (x, y, s))
-
-	#-----------------------------------------------------------------------
-	def showRight(self, x, y, s):
-		self("%.3f %.3f (%s) rightshow" % (x, y, s))
+	def showRight(self, s):
+		self("(%s) rightshow" % (s))
 
 	#-----------------------------------------------------------------------
 	def showCenter(self, left, right, y, s):
@@ -561,16 +597,6 @@ class Postscript:
 	#-----------------------------------------------------------------------
 	def view(self):
 		return subprocess.call([Postscript.VIEWER, self.f.name])
-
-	#-----------------------------------------------------------------------
-	@staticmethod
-	def mm2dots(mm):
-		return mm / Postscript.IN2MM * Postscript.DPI
-
-	#-----------------------------------------------------------------------
-	@staticmethod
-	def inches2dots(inches):
-		return inches * Postscript.DPI
 
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":

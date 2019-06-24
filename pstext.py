@@ -71,11 +71,27 @@ class PSTextExporter:
 		self.init()
 		self.text = text
 		self.ps = Postscript(filename, paper, landscape)
+		self.px = 72/text.winfo_fpixels("1i")
+
+	#-----------------------------------------------------------------------
+	def header(self, header):
+		self.ps.header = header
+
+	#-----------------------------------------------------------------------
+	def footer(self, footer):
+		self.ps.footer = footer
+
+	#-----------------------------------------------------------------------
+	def comment(self):
 		self.ps.comment()
+
+	#-----------------------------------------------------------------------
+	def prolog(self):
 		self.ps.prolog()
-		self.export()
+
+	#-----------------------------------------------------------------------
+	def close(self):
 		self.ps.close()
-		process = self.ps.view()
 
 	#-----------------------------------------------------------------------
 	def setFont(self, fontname):
@@ -89,7 +105,6 @@ class PSTextExporter:
 		if font.actual("slant") != "roman":
 			name += "-italic"
 		self.ps.setFont(name, font.actual("size"))
-
 #		print("font=",font.actual("family"))
 #		print("font-size=",font.actual("size"))
 #		print("font-weight=",font.actual("weight"))
@@ -101,31 +116,95 @@ class PSTextExporter:
 
 	#-----------------------------------------------------------------------
 	def init(self):
-		self.bg    = None
-		self.elide = False
+		self._bg       = None
+		self._elide    = False
+		self._tabs     = ()
+		self._justify  = None
+		self._lmargin1 = None
+		self._lmargin2 = None
 
 	#-----------------------------------------------------------------------
 	def updateTag(self, name, value):
 		if name == "font":
-			print("Set font",value)
+#			print("SetFont:",value)
 			self.setFont(value)
 		elif name == "foreground":
-			print("Color", value)
 			r,g,b = self.text.winfo_rgb(value)
 			self.ps.setColor(r/65536,g/65536,b/65536)
 		elif name == "background":
-			self.bg = self.text.winfo_rgb(value)
+			self._bg = self.text.winfo_rgb(value)
 
 		elif name == "elide":
-			self.elide = bool(value)
-			print("ELlDE = value=",value, self.elide)
+			self._elide = bool(value)
 
+#		elif name == "justify":
+#			self._justify = value
+
+		elif name == "tabs":
+			self._tabs = value
+#			print("TABS=",self._tabs)
+
+		elif name == "lmargin1":
+			self._lmargin1 = float(value)	# first line indent
+
+#		elif name == "lmargin2":
+#			self._lmargin2 = float(value)	# handing lines
+#		else:
+#			print("tag",name,value)
+
+	#-----------------------------------------------------------------------
+	def _newlineInit(self):
+		self._newline  = True
+		self._tabcount = 0
+		self._align    = "left"		# default left aligning
+
+	#-----------------------------------------------------------------------
+	def newline(self):
+		self.ps.newline()
+		self._newlineInit()
+
+	#-----------------------------------------------------------------------
+	def show(self, line):
+		if self._newline and self._lmargin1:
+			self.ps.rmoveto(self._lmargin1, 0)
+		self._newline  = False
+
+		if "\t" in line:
+#			print("LINE:",repr(line), "TABCOUNT=",self._tabcount)
+#			if "BEAM" in line or self.__pdb:
+#				import pdb; pdb.set_trace()
+#				self.__pdb = True
+			tline = line.split("\t")
+			for i,txt in enumerate(tline):
+#				print("\tTXT=",repr(txt), self._tabcount, self._align)
+				if txt:
+					if self._align == "left":
+						self.ps.show(Postscript.escape(txt), self._bg)
+					else:
+						self.ps.showRight(Postscript.escape(txt))
+				if i<len(tline)-1:	# ignore last item there is no tab after
+					if self._tabs:
+						try:
+							pixel = float(str(self._tabs[self._tabcount*2]))
+							self._align = str(self._tabs[self._tabcount*2+1])
+							self.ps.xmoveto(self.ps.margin_left + pixel*self.px)
+						except IndexError:
+							ppixel = float(str(self._tabs[-4]))
+							pixel  = float(str(self._tabs[-2]))
+							self._align  = str(self._tabs[-1])
+							self.ps.rmoveto((pixel-ppixel)*self.px, 0)
+					else:
+						# FIXME nonsense!!!
+						self.ps.rmoveto(self.ps.page_width/8, 0)
+						self._align = "left"
+					self._tabcount += 1
 		else:
-			print("tag",name,value)
+			self.ps.show(Postscript.escape(line), self._bg)
 
 	#-----------------------------------------------------------------------
 	def export(self):
 		self.ps.enableBuffer()
+		self._newlineInit()
 
 		dump = self.text.dump("1.0",tk.END)
 
@@ -150,10 +229,10 @@ class PSTextExporter:
 
 		self.init()			# Initialize variables
 		tagon(self.text.config())	# default configuration
-		self.bg = None			# ignore global background
+		self._bg = None			# ignore global background
 
 		for tag,value,pos in dump:
-			print("\nDUMP:",tag,repr(value),pos)
+#			print("\nDUMP:",tag,repr(value),pos)
 
 			if tag=="tagon":
 				tagstack.append((value,{}))
@@ -166,9 +245,7 @@ class PSTextExporter:
 					if tagstack[i][0] == value:
 						del tagstack[i]
 						break
-
 				self.init()		# Initialize variables
-
 				# re-create the combined tag
 				combinedtag = {}
 				for nd in tagstack:
@@ -179,28 +256,33 @@ class PSTextExporter:
 				for n,v in combinedtag.items():
 					self.updateTag(n,v)
 
-			elif tag=="text" and not self.elide:
+			elif tag=="text" and not self._elide:
 				if "\n" in value:
 					for i,line in enumerate(value.splitlines()):
-						if i: self.ps.newline()
-						self.ps.show(Postscript.escape(line), self.bg)
-					if value[-1]=="\n": self.ps.newline()
+						if i: self.newline()
+						self.show(line)
+					if value[-1]=="\n": self.newline()
 				else:
-					self.ps.show(Postscript.escape(value), self.bg)
+					self.show(value)
 
 			elif tag=="image":
-				image = tk.PhotoImage(name=value)
-				height = image.height()
-				width  = image.width()
-				data = image.cget("data")
-				print(">>>>>>>>>>>>>>>>>",value, image, height, width, len(data))
+				pass
+#				image = tk.PhotoImage(name=value)
+#				height = image.height()
+#				width  = image.width()
+#				data = image.cget("data")
+#				print(">>>>>>>>>>>>>>>>>",value, image, height, width, len(data))
 
 #			print("STACK=",[t[0] for t in tagstack])
 
 #-------------------------------------------------------------------------------
 def export2Ps(event=None):
 	global text
-	PSTextExporter(text, "pstext.ps", "A4")
+	ps = PSTextExporter(text, "pstext.ps", "A4")
+	ps.export()
+	ps.close()
+	ps.ps.view()
+
 
 INFO_ICON = """
 		R0lGODlhEAAQAOfEAAAAADVZkSZeryRfsCZfsCtgriZisydjtCdmtyZtvCljsyhltShntyxptSho
@@ -258,6 +340,8 @@ Pharetra pharetra massa massa ultricies mi quis hendrerit dolor magna. Nam at le
 	text.tag_config("line5", background="Yellow", font="Times,25,italic")
 	text.tag_config("lorem", font="Helvetica 40", foreground="Red")
 	text.tag_config("elide", elide=True)
+
+	print("pixel_per_inch=", root.winfo_fpixels("1i"))
 
 	text.pack(fill=tk.BOTH, expand=tk.YES)
 	text.bind("<Key-v>", export2Ps)
