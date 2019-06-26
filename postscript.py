@@ -14,14 +14,14 @@ import sys
 import time
 import subprocess
 
-inch = 72.0		# in dpi
-mm   = 72.0/25.4	# -//-
-cm   = 10*mm
-
 #===============================================================================
 # Postscript writing class
 #===============================================================================
 class Postscript:
+	inch = 72.0		# in dpi
+	mm   = 72.0/25.4	# -//-
+	cm   = 10*mm
+
 	VIEWER  = "gv"
 	HEADER  = "%!PS-Adobe-2.0"
 	CREATOR = "Postscript.py"
@@ -56,6 +56,7 @@ class Postscript:
 			"B8"          : (181, 258),
 			"B9"          : (127, 181),
 			"B10"         : (91, 127),
+			"EPS"         : (0, 0),		# user defined
 		}
 	DEFAULT_PAGE = "A4"
 
@@ -233,19 +234,22 @@ class Postscript:
 		self.footerfont         = "Times-Roman"
 		self.footersize         = 12
 		self.footergray         = 0.8
+		if paper not in Postscript.PAGES or paper == "EPS":
+			self.header = None
+			self.footer = None
 
 		self._tobuffer = False
 		self._buffer   = []	# buffer commands to find line height before drawing
 		self._page_marker = None
 		self._page_count  = 1
 
-		self.setPaperSize(paper, landscape)
-		self.setMargin(cm, cm, cm, cm)
+		self.setPaper(paper, landscape)
+		self.setMargin(Postscript.cm, Postscript.cm, Postscript.cm, Postscript.cm)
 		if filename:
 			self.open(filename)
 
 	#-----------------------------------------------------------------------
-	def setPaperSize(self, paper, landscape=False):
+	def setPaper(self, paper, landscape=False):
 		self.paper = paper
 		self.landscape = landscape
 		try:
@@ -257,11 +261,22 @@ class Postscript:
 			self.page_width, self.page_height = self.page_height, self.page_width
 
 	#-----------------------------------------------------------------------
-	def setMargin(self, left, right, top, bottom):
-		self.margin_left   = left
-		self.margin_right  = self.page_width - right
-		self.margin_top    = self.page_height - top
-		self.margin_bottom = bottom
+	def setPaperSize(self, width, height):
+		self.page_width  = width
+		self.page_height = height
+
+	#-----------------------------------------------------------------------
+	def setMargin(self, left=0, right=0, top=0, bottom=0):
+		if self.paper != "EPS":
+			self.margin_left   = left
+			self.margin_right  = self.page_width - right
+			self.margin_top    = self.page_height - top
+			self.margin_bottom = bottom
+		else:
+			self.margin_left   = 0
+			self.margin_right  = self.page_width
+			self.margin_bottom = 0
+			self.margin_top    = self.page_height
 
 	#-----------------------------------------------------------------------
 	def open(self, filename):
@@ -299,10 +314,10 @@ class Postscript:
 	def __call__(self, *args):
 		"""Write current arguments to a new line"""
 		if self._tobuffer:
-			self._buffer.append(" ".join(args))
+			self._buffer.append(" ".join(map(str,args)))
 #			print("Buffering...", self._buffer[-1])
 		else:
-			self.write(" ".join(args))
+			self.write(" ".join(map(str,args)))
 			self.write("\n")
 
 	#-----------------------------------------------------------------------
@@ -324,13 +339,18 @@ class Postscript:
 		if Postscript.TITLE:
 			self("%%Title:", Postscript.TITLE)
 		self("%%CreationDate:",time.ctime())
-		self("%%DocumentPaperSizes:",self.paper)
-		self("%%Orientation:", "Landscape" if self.landscape else "Portrait")
-		self("%%Pages:       ")
-		try:
-			self._page_marker = self.f.tell()-7
-		except AttributeError:
-			pass
+		if self.paper == "EPS":
+			self("%%%%BoundingBox: %d %d %d %d"%\
+				(self.margin_left, self.margin_bottom,
+				 self.margin_right, self.margin_top))
+		else:
+			self("%%DocumentPaperSizes:",self.paper)
+			self("%%Orientation:", "Landscape" if self.landscape else "Portrait")
+			self("%%Pages:       ")
+			try:
+				self._page_marker = self.f.tell()-7
+			except AttributeError:
+				pass
 		self("%%EndComments")
 #		PrologTarget = "%%BeginProlog\n"
 
@@ -397,8 +417,8 @@ class Postscript:
 				self.show(self.header)
 			self.newpath()
 			self.lineWidth(0.1)
-			self.moveto(self.margin_left,  self.margin_top-1*mm)
-			self.lineto(self.margin_right, self.margin_top-1*mm)
+			self.moveto(self.margin_left,  self.margin_top-1*Postscript.mm)
+			self.lineto(self.margin_right, self.margin_top-1*Postscript.mm)
 			self.stroke()
 
 		if self.footer:
@@ -406,12 +426,17 @@ class Postscript:
 			self.setGray(self.footergray)
 
 			# Page number
-			self.showCenter(self.margin_left, self.margin_right, self.margin_bottom-2*mm,
-					self.footer%(self._page_count))
+			try:
+				footertxt = self.footer % (self._page_count)
+			except TypeError:
+				footertxt = self.footer
+
+			self.showCenter(self.margin_left, self.margin_right, self.margin_bottom-2*Postscript.mm,
+					self.footertxt)
 			self.newpath()
 			self.lineWidth(0.1)
-			self.moveto(self.margin_left,  self.margin_bottom+2*mm)
-			self.lineto(self.margin_right, self.margin_bottom+2*mm)
+			self.moveto(self.margin_left,  self.margin_bottom+2*Postscript.mm)
+			self.lineto(self.margin_right, self.margin_bottom+2*Postscript.mm)
 			self.stroke()
 		self.grestore()
 #		self("EndInclude")
@@ -616,12 +641,12 @@ if __name__ == "__main__":
 	ps.show(Postscript.escape("Background text"), (0.7, 0.6, 0.5))
 #	ps.setColor(0,0,0)
 #	ps.show(Postscript.escape("Background text"))
-#	ps.rect(2*cm, 15*cm, 4*cm, 6*cm)
+#	ps.rect(2*Postscript.cm, 15*Postscript.cm, 4*Postscript.cm, 6*Postscript.cm)
 
 #	ps.lineWidth(1)
-#	ps.rlineto(5*cm,0)
+#	ps.rlineto(5*Postscript.cm,0)
 #	ps.rlineto(0,8)
-#	ps.rlineto(-5*cm,0)
+#	ps.rlineto(-5*Postscript.cm,0)
 #	ps.stroke()
 #	ps.newline()
 #	ps.show("Hello world2")
